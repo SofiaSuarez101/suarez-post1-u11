@@ -82,3 +82,44 @@ Se evalúan tres cargas de trabajo representativas:
 2. **Liderazgo en Eficiencia Energética ($\text{muestras/s/W}$):** Cuando se normaliza el rendimiento por el consumo térmico de diseño (TDP), el liderazgo se desplaza hacia arquitecturas especializadas de menor consumo como el acelerador ASIC **Qualcomm Cloud AI 100 Ultra** ($262.67\text{ muestras/s/W}$ en ResNet-50, superando en $2.08\times$ la eficiencia energética de la H100) y la **NVIDIA L4** ($184.03\text{ muestras/s/W}$ en ResNet-50 y $0.00333\text{ muestras/s/W}$ en Stable Diffusion XL). Desde el punto de vista arquitectónico, la H100 penaliza su eficiencia energética debido a que opera en puntos elevados de la curva frecuencia-voltaje (consumiendo hasta $700\text{ W}$) y conserva circuitería de propósito general (planificadores dinámicos de *warps*, coherencia de caché L1/L2 y soporte $\text{FP64}$). En contraste, los aceleradores *dataflow* y arreglos sistólicos (como Qualcomm AI 100 y Google TPU v5e) eliminan el control dinámico por instrucción, utilizando planificación estática en tiempo de compilación y memorias SRAM locales de bajo voltaje que minimizan la energía consumida por movimiento de datos.
 
 ---
+
+## 3. Análisis Costo-Rendimiento y Costo Total de Propiedad (TCO)
+
+En entornos de producción, la selección de infraestructura no puede basarse únicamente en el rendimiento máximo, sino en el **Costo Total de Propiedad (TCO)** a un horizonte estándar de amortización de $3\text{ años}$ ($26{,}280\text{ horas}$ de operación continua $24/7$). El TCO integra tres componentes: gasto de capital inicial (CAPEX), gasto operativo energético (OPEX eléctrico) y costos de ingeniería de software y mantenimiento.
+
+### 3.1. Parámetros Base de Costos y Consumo
+
+* **Costos de adquisición / arrendamiento de referencia:**
+  * **NVIDIA H100 SXM5 ($80\text{ GB}$):** $\approx \$30{,}000\text{ USD}$ por GPU (más $\approx \$8{,}000\text{ USD}$ prorrateados del servidor anfitrión PCIe/HGX, red y almacenamiento).
+  * **Google Cloud TPU Pod (vía nube):** $\approx \$32.00\text{ USD/hora}$ para un *slice* de $8\text{ chips}$ TPU v4/v5p bajo demanda ($\approx \$4.00\text{ USD/hora}$ por chip de entrenamiento de alta gama, o $\approx \$1.20\text{ USD/hora}$ por chip TPU v5e optimizado para inferencia).
+  * **FPGA AMD/Xilinx Alveo U55C:** $\approx \$8{,}000\text{ USD}$ por tarjeta aceleradora (más $\approx \$2{,}500\text{ USD}$ de servidor anfitrión estándar).
+  * **Apple M3 Ultra Mac Studio:** $\approx \$4{,}000\text{ USD}$ por sistema completo integrado (CPU, GPU, NPU, memoria unificada y chasis).
+* **Modelo de consumo energético (OPEX a 3 años):** Se asume una tarifa eléctrica industrial promedio de $\$0.12\text{ USD/kWh}$, un factor de carga promedio del $80\%$ sobre el TDP nominal y un índice de eficiencia energética del centro de datos ($\text{PUE}$) de $1.3$ (incluyendo refrigeración y distribución eléctrica) para servidores en *rack*, frente a $\text{PUE} = 1.05$ en entornos de oficina o borde sin climatización especializada:
+  $$\text{Costo Eléctrico}_{3\text{ años}} = \left(\frac{\text{TDP (W)}}{1{,}000}\right) \times 0.80 \times \text{PUE} \times 26{,}280\text{ h} \times \$0.12\text{ USD/kWh}$$
+* **Costo de ingeniería de software y mantenimiento (3 años):** Los ecosistemas maduros con soporte nativo para PyTorch/ONNX (NVIDIA CUDA/TensorRT y Apple Core ML/MLX) requieren una inversión moderada de integración y mantenimiento MLOps ($\approx \$15{,}000\text{ USD}$ a 3 años). Por el contrario, el desarrollo sobre FPGA (Vitis HLS / RTL) demanda perfiles altamente especializados en diseño digital y cierre de tiempos (*timing closure*), elevando el costo de ingeniería a $\approx \$75{,}000\text{ USD}$ en el mismo periodo cuando se desarrollan *pipelines* a medida.
+
+### 3.2. Escenario (a): Startup de IA con Inferencia en la Nube a Escala Media ($< 100\text{ solicitudes/s}$)
+
+Una *startup* que sirve un modelo de visión o lenguaje de tamaño medio con una tasa inferior a $100\text{ solicitudes/segundo}$ ($< 8.64\text{ millones}$ de peticiones diarias) enfrenta patrones de tráfico variables con picos diurnos y valles nocturnos.
+
+| Alternativa de Despliegue | CAPEX Inicial (USD) | OPEX Eléctrico / Nube 3 Años (USD) | Ingeniería y Mantenimiento 3 Años (USD) | TCO Total Estimado a 3 Años (USD) | Utilización Efectiva de Capacidad |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **Servidor On-Premise ($1 \times \text{H100 SXM}$)** | $\$38{,}000$ | $\$2{,}295$ ($700\text{ W}$, $\text{PUE } 1.3$) | $\$24{,}000$ (colocation + MLOps) | **$\$64{,}295$** | $< 12\%$ (altamente subutilizada) |
+| **Nube Google Cloud ($1 \times \text{TPU v5e}$ bajo demanda)** | $\$0$ | $\$31{,}536$ ($\$1.20/\text{h} \times 26{,}280\text{ h}$) | $\$15{,}000$ (integración XLA/JAX) | **$\$46{,}536$** | $45\%\text{–}70\%$ (escalable por demanda) |
+| **Servidor On-Premise ($1 \times \text{Alveo U55C}$)** | $\$10{,}500$ | $\$377$ ($115\text{ W}$, $\text{PUE } 1.3$) | $\$75{,}000$ (desarrollo HLS/RTL) | **$\$85{,}877$** | $\approx 35\%$ (rigidez ante cambios de modelo) |
+
+* **Veredicto técnico-económico:** Para una *startup* con menos de $100\text{ solicitudes/s}$, el despliegue en la nube mediante **Google Cloud TPU v5e** (o instancias GPU de gama media equivalentes en nube) resulta significativamente superior. Adquirir una H100 propia inmoviliza $\$38{,}000\text{ USD}$ de capital inicial para operar a menos del $12\%$ de su capacidad (ya que una sola H100 procesa cientos o miles de solicitudes por segundo), mientras que la FPGA dispara el TCO a $\$85{,}877\text{ USD}$ por el costo de ingeniería de hardware y ralentiza la iteración ágil de modelos. La nube elimina el CAPEX, reduce el TCO en un $27.6\%$ frente a la H100 propia y permite apagar nodos en horas valle.
+
+### 3.3. Escenario (b): Empresa con Inferencia en el Borde / Dispositivo (10 Nodos de Borde)
+
+Se evalúa el despliegue de $10$ estaciones locales de inferencia distribuidas en sucursales, puntos de inspección o vehículos autónomos (sin conectividad garantizada a la nube ni infraestructura eléctrica trifásica de centro de datos).
+
+| Alternativa de Despliegue ($10$ Nodos) | CAPEX Total 10 Nodos (USD) | OPEX Eléctrico 3 Años (USD) | Ingeniería y Soporte 3 Años (USD) | TCO Total 10 Nodos a 3 Años (USD) | Viabilidad Térmica y Física en Borde |
+| :--- | :---: | :---: | :---: | :---: | :--- |
+| **$10 \times \text{Apple M3 Ultra Mac Studio}$** | $\$40{,}000$ ($\$4{,}000/\text{u}$) | $\$4{,}238$ ($160\text{ W}$, $\text{PUE } 1.05$) | $\$18{,}000$ (Core ML / MLX) | **$\$62{,}238$** | Óptima: silencioso, formato compacto, $160\text{ W}$ |
+| **$10 \times \text{Servidores H100 SXM}$** | $\$380{,}000$ ($\$38{,}000/\text{u}$) | $\$22{,}950$ ($700\text{ W}$, $\text{PUE } 1.3$) | $\$30{,}000$ | **$\$432{,}950$** | Inviable: requiere racks, $700\text{ W}$ y climatización |
+| **$10 \times \text{Nodos FPGA Alveo U55C}$** | $\$105{,}000$ ($\$10{,}500/\text{u}$) | $\$3{,}770$ ($115\text{ W}$, $\text{PUE } 1.3$) | $\$75{,}000$ (amortizado en 10 nodos) | **$\$183{,}770$** | Viable en chasis industrial; amortiza NRE |
+
+* **Veredicto técnico-económico:** En escenarios de borde general (visión local, asistentes multimodales en sitio, análisis clínico privado), la arquitectura **NPU/SoC de memoria unificada (Apple M3 Ultra)** ofrece el menor TCO ($\$62{,}238\text{ USD}$ para $10$ nodos, es decir, $6.9\times$ más económica que H100), operando con un consumo eléctrico mínimo y sin requerimientos de refrigeración de centro de datos. Únicamente cuando el entorno de borde exige procesamiento determinístico sub-milisegundo acoplado directamente a sensores industriales sin sistema operativo intermedio (como conducción autónoma de nivel 4 o control robótico crítico), la **FPGA** justifica su TCO de $\$183{,}770\text{ USD}$ al amortizar los costos de ingeniería no recurrentes (NRE) entre múltiples unidades idénticas.
+
+---
